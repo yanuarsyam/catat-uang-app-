@@ -47,5 +47,8 @@ dependencies {
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
+    // ML Kit Text Recognition (Model Latin Offline)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 }
