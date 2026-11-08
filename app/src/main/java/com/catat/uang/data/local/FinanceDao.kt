@@ -19,6 +19,9 @@ interface FinanceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAccount(account: Account): Long
 
+    @Query("UPDATE accounts SET balance = :newBalance WHERE id = :accountId")
+    suspend fun setAccountBalanceDirectly(accountId: Long, newBalance: Long)
+
     @Query("SELECT * FROM categories ORDER BY name ASC")
     fun getAllCategories(): Flow<List<Category>>
 

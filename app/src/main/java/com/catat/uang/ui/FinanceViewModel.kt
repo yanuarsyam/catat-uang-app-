@@ -35,9 +35,10 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     private fun seedInitialDataIfEmpty() {
         viewModelScope.launch {
             if (dao.getAccountCount() == 0) {
-                dao.insertAccount(Account(name = "Dompet Tunai", balance = 750000, colorHex = "#2E7D32"))
-                dao.insertAccount(Account(name = "Rekening Bank", balance = 8450000, colorHex = "#1565C0"))
-                dao.insertAccount(Account(name = "E-Wallet", balance = 620000, colorHex = "#6A1B9A"))
+                // Semua saldo dompet awal disetel 0
+                dao.insertAccount(Account(name = "Dompet Tunai", balance = 0L, colorHex = "#2E7D32"))
+                dao.insertAccount(Account(name = "Rekening Bank", balance = 0L, colorHex = "#1565C0"))
+                dao.insertAccount(Account(name = "E-Wallet", balance = 0L, colorHex = "#6A1B9A"))
 
                 dao.insertCategory(Category(name = "Dapur & Sembako", colorHex = "#D32F2F"))
                 dao.insertCategory(Category(name = "Kendaraan & BBM", colorHex = "#F57C00"))
@@ -45,6 +46,12 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                 dao.insertCategory(Category(name = "Jajan & Kopi", colorHex = "#7B1FA2"))
                 dao.insertCategory(Category(name = "Gaji / Pemasukan", colorHex = "#388E3C"))
             }
+        }
+    }
+
+    fun updateAccountBalance(accountId: Long, newBalance: Long) {
+        viewModelScope.launch {
+            dao.setAccountBalanceDirectly(accountId, newBalance)
         }
     }
 

@@ -1,6 +1,5 @@
 package com.catat.uang.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -16,11 +15,13 @@ import com.catat.uang.data.model.Category
 fun AddTransactionDialog(
     accounts: List<Account>,
     categories: List<Category>,
+    initialAmount: Long = 0L,
+    initialNote: String = "",
     onDismiss: () -> Unit,
     onSave: (accountId: Long, categoryId: Long, amount: Long, type: String, note: String) -> Unit
 ) {
-    var amountText by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf(if (initialAmount > 0) initialAmount.toString() else "") }
+    var note by remember { mutableStateOf(initialNote) }
     var isExpense by remember { mutableStateOf(true) }
 
     var selectedAccount by remember { mutableStateOf(accounts.firstOrNull()) }
@@ -31,7 +32,7 @@ fun AddTransactionDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Tambah Catatan") },
+        title = { Text(if (initialAmount > 0) "Hasil Pindai Struk" else "Tambah Catatan") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -55,7 +56,6 @@ fun AddTransactionDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Pilih Dompet
                 ExposedDropdownMenuBox(
                     expanded = accountExpanded,
                     onExpandedChange = { accountExpanded = it }
@@ -84,7 +84,6 @@ fun AddTransactionDialog(
                     }
                 }
 
-                // Pilih Kategori
                 ExposedDropdownMenuBox(
                     expanded = categoryExpanded,
                     onExpandedChange = { categoryExpanded = it }
