@@ -1,7 +1,14 @@
 package com.catat.uang.data.local
 
-import androidx.room.*
-import com.catat.uang.data.model.*
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import com.catat.uang.data.model.Account
+import com.catat.uang.data.model.Category
+import com.catat.uang.data.model.CategorySummary
+import com.catat.uang.data.model.TransactionEntity
+import com.catat.uang.data.model.TransactionItem
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -18,25 +25,27 @@ interface FinanceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCategory(category: Category): Long
 
-    @Transaction
-    @Query("SELECT * FROM transactions ORDER BY timestamp DESC")
-    fun getAllTransactions(): Flow<List<TransactionDetail>>
+    @Query("""
+        SELECT 
+            t.id, t.amount, t.type, t.timestamp, t.note,
+            a.name AS accountName,
+            c.name AS categoryName,
+            c.colorHex AS categoryColor
+        FROM transactions t
+        INNER JOIN accounts a ON t.accountId = a.id
+        INNER JOIN categories c ON t.categoryId = c.id
+        ORDER BY t.timestamp DESC
+    """)
+    fun getAllTransactions(): Flow<List<TransactionItem>>
+
+    @Insert
+    suspend fun insertTransaction(transaction: TransactionEntity): Long
 
     @Query("UPDATE accounts SET balance = balance + :delta WHERE id = :accountId")
     suspend fun updateAccountBalance(accountId: Long, delta: Long)
 
-    @Insert
-    suspend fun insertTransactionRaw(transaction: Transaction): Long
-
-    @Transaction
-    suspend fun insertTransaction(transaction: Transaction) {
-        insertTransactionRaw(transaction)
-        val delta = if (transaction.type == "INCOME") transaction.amount else -transaction.amount
-        updateAccountBalance(transaction.accountId, delta)
-    }
-
     @Query("""
-        SELECT c.name AS categoryName, c.colorHex AS colorHex, SUM(t.amount) AS totalAmount
+        SELECT c.name AS categoryName, c.colorHex AS colorHex, COALESCE(SUM(t.amount), 0) AS totalAmount
         FROM transactions t
         INNER JOIN categories c ON t.categoryId = c.id
         WHERE t.type = 'EXPENSE'

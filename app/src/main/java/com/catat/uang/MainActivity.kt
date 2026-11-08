@@ -4,7 +4,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -19,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.catat.uang.data.model.Account
-import com.catat.uang.data.model.TransactionDetail
+import com.catat.uang.data.model.TransactionItem
 import com.catat.uang.ui.FinanceViewModel
 import com.catat.uang.ui.components.AddTransactionDialog
 import com.catat.uang.ui.components.DonutChart
@@ -80,7 +79,6 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Kartu Total Saldo
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -97,7 +95,6 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 }
             }
 
-            // 2. Barisan Dompet Aktif
             item {
                 Text(text = "Dompet Aktif", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
@@ -120,7 +117,6 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 }
             }
 
-            // 3. Grafik Pengeluaran
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -137,7 +133,6 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 }
             }
 
-            // 4. Riwayat Transaksi
             item {
                 Text(text = "Riwayat Transaksi", style = MaterialTheme.typography.titleMedium)
             }
@@ -174,10 +169,10 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
 }
 
 @Composable
-fun TransactionRow(detail: TransactionDetail, formatter: NumberFormat) {
-    val isExpense = detail.transaction.type == "EXPENSE"
-    val dateStr = remember(detail.transaction.timestamp) {
-        SimpleDateFormat("dd MMM, HH:mm", Locale("id", "ID")).format(Date(detail.transaction.timestamp))
+fun TransactionRow(item: TransactionItem, formatter: NumberFormat) {
+    val isExpense = item.type == "EXPENSE"
+    val dateStr = remember(item.timestamp) {
+        SimpleDateFormat("dd MMM, HH:mm", Locale("id", "ID")).format(Date(item.timestamp))
     }
 
     Card(
@@ -191,17 +186,17 @@ fun TransactionRow(detail: TransactionDetail, formatter: NumberFormat) {
         ) {
             Column {
                 Text(
-                    text = detail.transaction.note.ifBlank { detail.category.name },
+                    text = item.note.ifBlank { item.categoryName },
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Text(
-                    text = "${detail.account.name} • $dateStr",
+                    text = "${item.accountName} • $dateStr",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray
                 )
             }
             Text(
-                text = "${if (isExpense) "-" else "+"}${formatter.format(detail.transaction.amount)}",
+                text = "${if (isExpense) "-" else "+"}${formatter.format(item.amount)}",
                 style = MaterialTheme.typography.titleMedium,
                 color = if (isExpense) MaterialTheme.colorScheme.error else Color(0xFF2E7D32)
             )

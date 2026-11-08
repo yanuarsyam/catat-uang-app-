@@ -14,7 +14,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     val accounts: StateFlow<List<Account>> = dao.getAllAccounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val transactions: StateFlow<List<TransactionDetail>> = dao.getAllTransactions()
+    val transactions: StateFlow<List<TransactionItem>> = dao.getAllTransactions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val expenseSummary: StateFlow<List<CategorySummary>> = dao.getExpenseSummaryByCategory()
@@ -51,7 +51,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     fun addTransaction(accountId: Long, categoryId: Long, amount: Long, type: String, note: String) {
         viewModelScope.launch {
             dao.insertTransaction(
-                Transaction(
+                TransactionEntity(
                     accountId = accountId,
                     categoryId = categoryId,
                     amount = amount,
@@ -60,6 +60,8 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                     note = note
                 )
             )
+            val delta = if (type == "INCOME") amount else -amount
+            dao.updateAccountBalance(accountId, delta)
         }
     }
 

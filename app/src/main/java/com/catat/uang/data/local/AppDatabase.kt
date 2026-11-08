@@ -6,10 +6,10 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.catat.uang.data.model.Account
 import com.catat.uang.data.model.Category
-import com.catat.uang.data.model.Transaction
+import com.catat.uang.data.model.TransactionEntity
 
 @Database(
-    entities = [Account::class, Category::class, Transaction::class],
+    entities = [Account::class, Category::class, TransactionEntity::class],
     version = 1,
     exportSchema = false
 )
