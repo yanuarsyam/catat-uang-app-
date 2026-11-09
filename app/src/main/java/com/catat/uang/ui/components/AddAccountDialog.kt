@@ -11,40 +11,30 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AddAccountDialog(
     onDismiss: () -> Unit,
-    onSave: (name: String, initialBalance: Long, type: String) -> Unit
+    onSave: (name: String, initialBalance: Long) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var balanceText by remember { mutableStateOf("") }
-    var selectedType by remember { mutableStateOf("Bank") }
-    val types = listOf("Bank", "E-Wallet", "Tunai")
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Tambah Dompet / Rekening") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    types.forEach { type ->
-                        FilterChip(
-                            selected = selectedType == type,
-                            onClick = { selectedType = type },
-                            label = { Text(type) }
-                        )
-                    }
-                }
-
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Nama (misal: BCA, Mandiri, GoPay)") },
+                    label = { Text("Nama Akun (misal: BCA, Mandiri, GoPay)") },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-
                 OutlinedTextField(
                     value = balanceText,
                     onValueChange = { if (it.all { c -> c.isDigit() }) balanceText = it },
                     label = { Text("Saldo Awal (Rp)") },
+                    placeholder = { Text("0") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -53,13 +43,13 @@ fun AddAccountDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        val bal = balanceText.toLongOrNull() ?: 0L
-                        onSave(name.trim(), bal, selectedType)
+                        val initialBal = balanceText.toLongOrNull() ?: 0L
+                        onSave(name.trim(), initialBal)
                         onDismiss()
                     }
                 }
             ) {
-                Text("Simpan")
+                Text("Tambah")
             }
         },
         dismissButton = {

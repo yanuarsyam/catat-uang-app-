@@ -29,12 +29,13 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
     init {
-        seedInitialDataIfEmpty()
+        seedInitialCategoriesIfEmpty()
     }
 
-    private fun seedInitialDataIfEmpty() {
+    private fun seedInitialCategoriesIfEmpty() {
         viewModelScope.launch {
             if (dao.getAccountCount() == 0) {
+                // Inisialisasi awal default jika kosong
                 dao.insertAccount(Account(name = "Dompet Tunai", balance = 0L, colorHex = "#2E7D32"))
                 dao.insertAccount(Account(name = "Rekening Bank", balance = 0L, colorHex = "#1565C0"))
                 dao.insertAccount(Account(name = "E-Wallet", balance = 0L, colorHex = "#6A1B9A"))
@@ -48,20 +49,15 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun updateAccountBalance(accountId: Long, newBalance: Long) {
+    fun addAccount(name: String, initialBalance: Long, colorHex: String = "#1565C0") {
         viewModelScope.launch {
-            dao.setAccountBalanceDirectly(accountId, newBalance)
+            dao.insertAccount(Account(name = name, balance = initialBalance, colorHex = colorHex))
         }
     }
 
-    fun addNewAccount(name: String, initialBalance: Long, type: String) {
+    fun updateAccountBalance(accountId: Long, newBalance: Long) {
         viewModelScope.launch {
-            val color = when (type) {
-                "Bank" -> "#1565C0"
-                "E-Wallet" -> "#6A1B9A"
-                else -> "#2E7D32"
-            }
-            dao.insertAccount(Account(name = name, balance = initialBalance, colorHex = color))
+            dao.setAccountBalanceDirectly(accountId, newBalance)
         }
     }
 

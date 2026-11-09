@@ -1,7 +1,10 @@
 package com.catat.uang
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -24,10 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.catat.uang.data.model.Account
 import com.catat.uang.data.model.TransactionItem
 import com.catat.uang.ui.FinanceViewModel
+import com.catat.uang.ui.components.AddAccountDialog
 import com.catat.uang.ui.components.AddTransactionDialog
 import com.catat.uang.ui.components.DonutChart
 import com.catat.uang.ui.components.EditBalanceDialog
@@ -65,6 +70,7 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
     val categories by viewModel.getCategories().collectAsState(initial = emptyList())
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var showAddAccountDialog by remember { mutableStateOf(false) }
     var showScanChoiceDialog by remember { mutableStateOf(false) }
     var accountToEdit by remember { mutableStateOf<Account?>(null) }
     var isScanning by remember { mutableStateOf(false) }
@@ -97,11 +103,39 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
         uri?.let { processImage(it) }
     }
 
-    fun launchCameraSafe() {
-        val file = File(context.cacheDir, "temp_receipt_${System.currentTimeMillis()}.jpg")
-        val uri = FileProvider.getUriForFile(context, "com.catat.uang.fileprovider", file)
-        tempPhotoUri = uri
-        cameraLauncher.launch(uri)
+    fun launchCameraInternal() {
+        try {
+            val file = File(context.cacheDir, "receipt_${System.currentTimeMillis()}.jpg")
+            if (!file.exists()) file.createNewFile()
+            val uri = FileProvider.getUriForFile(context, "com.catat.uang.fileprovider", file)
+            tempPhotoUri = uri
+            cameraLauncher.launch(uri)
+        } catch (e: Exception) {
+            Toast.makeText(context, "Gagal membuka kamera: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            launchCameraInternal()
+        } else {
+            Toast.makeText(context, "Izin kamera diperlukan untuk foto struk", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun checkAndLaunchCamera() {
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasPermission) {
+            launchCameraInternal()
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
     }
 
     val formatter = remember {
@@ -128,7 +162,7 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                     },
                     containerColor = MaterialTheme.colorScheme.primary
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Tambah Manual")
+                    Icon(Icons.Default.Add, contentDescription = "Tambah Catatan")
                 }
             }
         }
@@ -155,7 +189,18 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 }
 
                 item {
-                    Text(text = "Dompet Aktif (Ketuk untuk atur saldo)", style = MaterialTheme.typography.titleMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "Dompet & Rekening", style = MaterialTheme.typography.titleMedium)
+                        TextButton(onClick = { showAddAccountDialog = true }) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Tambah")
+                        }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(accounts) { acc ->
@@ -238,11 +283,11 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
             AlertDialog(
                 onDismissRequest = { showScanChoiceDialog = false },
                 title = { Text("Pindai Struk") },
-                text = { Text("Pilih metode pengambilan gambar struk:") },
+                text = { Text("Pilih metode pengambilan struk belanja:") },
                 confirmButton = {
                     Button(onClick = {
                         showScanChoiceDialog = false
-                        launchCameraSafe()
+                        checkAndLaunchCamera()
                     }) {
                         Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
@@ -281,6 +326,15 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 onDismiss = { accountToEdit = null },
                 onSave = { newBal ->
                     viewModel.updateAccountBalance(acc.id, newBal)
+                }
+            )
+        }
+
+        if (showAddAccountDialog) {
+            AddAccountDialog(
+                onDismiss = { showAddAccountDialog = false },
+                onSave = { accName, initialBal ->
+                    viewModel.addAccount(accName, initialBal)
                 }
             )
         }
