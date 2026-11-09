@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,28 +65,39 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
     val categories by viewModel.getCategories().collectAsState(initial = emptyList())
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var showScanChoiceDialog by remember { mutableStateOf(false) }
     var accountToEdit by remember { mutableStateOf<Account?>(null) }
     var isScanning by remember { mutableStateOf(false) }
     var prefillAmount by remember { mutableStateOf(0L) }
     var prefillNote by remember { mutableStateOf("") }
     var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
+    fun processImage(uri: Uri) {
+        isScanning = true
+        coroutineScope.launch {
+            val parsed = ReceiptScanner.parseFromUri(context, uri)
+            isScanning = false
+            prefillAmount = parsed.totalAmount
+            prefillNote = parsed.merchant
+            showAddDialog = true
+        }
+    }
+
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success && tempPhotoUri != null) {
-            isScanning = true
-            coroutineScope.launch {
-                val parsed = ReceiptScanner.parseFromUri(context, tempPhotoUri!!)
-                isScanning = false
-                prefillAmount = parsed.totalAmount
-                prefillNote = parsed.merchant
-                showAddDialog = true
-            }
+            processImage(tempPhotoUri!!)
         }
     }
 
-    fun launchCamera() {
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { processImage(it) }
+    }
+
+    fun launchCameraSafe() {
         val file = File(context.cacheDir, "temp_receipt_${System.currentTimeMillis()}.jpg")
         val uri = FileProvider.getUriForFile(context, "com.catat.uang.fileprovider", file)
         tempPhotoUri = uri
@@ -103,7 +115,7 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
         floatingActionButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ExtendedFloatingActionButton(
-                    onClick = { launchCamera() },
+                    onClick = { showScanChoiceDialog = true },
                     icon = { Icon(Icons.Default.CameraAlt, contentDescription = "Scan Struk") },
                     text = { Text("Scan Struk") },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
@@ -198,7 +210,7 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                     }
                 }
 
-                item { Spacer(modifier = Modifier.height(80.dp)) }
+                item { Spacer(modifier = Modifier.height(84.dp)) }
             }
 
             if (isScanning) {
@@ -220,6 +232,34 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                     }
                 }
             }
+        }
+
+        if (showScanChoiceDialog) {
+            AlertDialog(
+                onDismissRequest = { showScanChoiceDialog = false },
+                title = { Text("Pindai Struk") },
+                text = { Text("Pilih metode pengambilan gambar struk:") },
+                confirmButton = {
+                    Button(onClick = {
+                        showScanChoiceDialog = false
+                        launchCameraSafe()
+                    }) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Kamera")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = {
+                        showScanChoiceDialog = false
+                        galleryLauncher.launch("image/*")
+                    }) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Galeri")
+                    }
+                }
+            )
         }
 
         if (showAddDialog) {
