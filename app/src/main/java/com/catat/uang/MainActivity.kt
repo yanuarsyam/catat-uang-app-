@@ -10,6 +10,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,9 +19,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,28 +29,37 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.catat.uang.data.model.Account
 import com.catat.uang.data.model.TransactionItem
 import com.catat.uang.ui.FinanceViewModel
-import com.catat.uang.ui.components.AddAccountDialog
-import com.catat.uang.ui.components.AddTransactionDialog
-import com.catat.uang.ui.components.DonutChart
-import com.catat.uang.ui.components.EditBalanceDialog
+import com.catat.uang.ui.components.*
 import com.catat.uang.util.ReceiptScanner
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.NumberFormat
-import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : ComponentActivity() {
     private val viewModel: FinanceViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                DashboardScreen(viewModel)
+                var showSplash by remember { mutableStateOf(true) }
+                Crossfade(
+                    targetState = showSplash,
+                    animationSpec = tween(durationMillis = 500),
+                    label = "splash_transition"
+                ) { isSplash ->
+                    if (isSplash) {
+                        SplashScreen(onFinished = { showSplash = false })
+                    } else {
+                        DashboardScreen(viewModel)
+                    }
+                }
             }
         }
     }
@@ -72,7 +81,10 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
     var showAddDialog by remember { mutableStateOf(false) }
     var showAddAccountDialog by remember { mutableStateOf(false) }
     var showScanChoiceDialog by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
     var accountToEdit by remember { mutableStateOf<Account?>(null) }
+    var transactionToDelete by remember { mutableStateOf<TransactionItem?>(null) }
+
     var isScanning by remember { mutableStateOf(false) }
     var prefillAmount by remember { mutableStateOf(0L) }
     var prefillNote by remember { mutableStateOf("") }
@@ -85,6 +97,7 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
             isScanning = false
             prefillAmount = parsed.totalAmount
             prefillNote = parsed.merchant
+            Toast.makeText(context, "Dipindai via ${parsed.sourceEngine}", Toast.LENGTH_SHORT).show()
             showAddDialog = true
         }
     }
@@ -92,9 +105,7 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
-        if (success && tempPhotoUri != null) {
-            processImage(tempPhotoUri!!)
-        }
+        if (success && tempPhotoUri != null) processImage(tempPhotoUri!!)
     }
 
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -118,24 +129,14 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        if (isGranted) {
-            launchCameraInternal()
-        } else {
-            Toast.makeText(context, "Izin kamera diperlukan untuk foto struk", Toast.LENGTH_SHORT).show()
-        }
+        if (isGranted) launchCameraInternal()
+        else Toast.makeText(context, "Izin kamera diperlukan", Toast.LENGTH_SHORT).show()
     }
 
     fun checkAndLaunchCamera() {
-        val hasPermission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.CAMERA
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (hasPermission) {
-            launchCameraInternal()
-        } else {
-            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-        }
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        if (granted) launchCameraInternal()
+        else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
     val formatter = remember {
@@ -144,7 +145,14 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Catatan Keuangan", style = MaterialTheme.typography.titleLarge) })
+            TopAppBar(
+                title = { Text("Catatan Keuangan", style = MaterialTheme.typography.titleLarge) },
+                actions = {
+                    IconButton(onClick = { showApiKeyDialog = true }) {
+                        Icon(Icons.Default.Key, contentDescription = "Atur Gemini API Key")
+                    }
+                }
+            )
         },
         floatingActionButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -201,17 +209,29 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                             Text("Tambah")
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(accounts) { acc ->
                             Card(
                                 modifier = Modifier
-                                    .width(160.dp)
+                                    .width(165.dp)
                                     .clickable { accountToEdit = acc },
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
-                                    Text(text = acc.name, style = MaterialTheme.typography.bodyMedium)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = acc.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Icon(Icons.Default.Edit, contentDescription = "Ubah", modifier = Modifier.size(14.dp), tint = Color.Gray)
+                                    }
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(text = formatter.format(acc.balance), style = MaterialTheme.typography.titleSmall)
                                 }
@@ -251,7 +271,7 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                     }
                 } else {
                     items(transactions) { item ->
-                        TransactionRow(item, formatter)
+                        TransactionRow(item = item, formatter = formatter, onDeleteClick = { transactionToDelete = item })
                     }
                 }
 
@@ -259,19 +279,13 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
             }
 
             if (isScanning) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color.Black.copy(alpha = 0.5f)
-                ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = Color.Black.copy(alpha = 0.5f)) {
                     Box(contentAlignment = Alignment.Center) {
                         Card {
-                            Column(
-                                modifier = Modifier.padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
+                            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 CircularProgressIndicator()
                                 Spacer(modifier = Modifier.height(16.dp))
-                                Text("Membaca teks struk...")
+                                Text("Menganalisis struk...")
                             }
                         }
                     }
@@ -280,29 +294,21 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
         }
 
         if (showScanChoiceDialog) {
-            AlertDialog(
-                onDismissRequest = { showScanChoiceDialog = false },
-                title = { Text("Pindai Struk") },
-                text = { Text("Pilih metode pengambilan struk belanja:") },
-                confirmButton = {
-                    Button(onClick = {
-                        showScanChoiceDialog = false
-                        checkAndLaunchCamera()
-                    }) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Kamera")
-                    }
-                },
-                dismissButton = {
-                    OutlinedButton(onClick = {
-                        showScanChoiceDialog = false
-                        galleryLauncher.launch("image/*")
-                    }) {
-                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Galeri")
-                    }
+            ScanChoiceDialog(
+                onDismiss = { showScanChoiceDialog = false },
+                onCameraClick = { showScanChoiceDialog = false; checkAndLaunchCamera() },
+                onGalleryClick = { showScanChoiceDialog = false; galleryLauncher.launch("image/*") }
+            )
+        }
+
+        if (showApiKeyDialog) {
+            ApiKeyDialog(
+                initialKey = ReceiptScanner.getApiKey(context),
+                onDismiss = { showApiKeyDialog = false },
+                onSave = { key ->
+                    ReceiptScanner.saveApiKey(context, key)
+                    Toast.makeText(context, "API Key tersimpan", Toast.LENGTH_SHORT).show()
+                    showApiKeyDialog = false
                 }
             )
         }
@@ -321,54 +327,25 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
         }
 
         accountToEdit?.let { acc ->
-            EditBalanceDialog(
+            EditAccountDialog(
                 account = acc,
                 onDismiss = { accountToEdit = null },
-                onSave = { newBal ->
-                    viewModel.updateAccountBalance(acc.id, newBal)
-                }
+                onSave = { newName, newBal -> viewModel.updateAccountDetails(acc.id, newName, newBal) }
             )
         }
 
         if (showAddAccountDialog) {
             AddAccountDialog(
                 onDismiss = { showAddAccountDialog = false },
-                onSave = { accName, initialBal ->
-                    viewModel.addAccount(accName, initialBal)
-                }
+                onSave = { accName, initialBal -> viewModel.addAccount(accName, initialBal) }
             )
         }
-    }
-}
 
-@Composable
-fun TransactionRow(item: TransactionItem, formatter: NumberFormat) {
-    val isExpense = item.type == "EXPENSE"
-    val dateStr = remember(item.timestamp) {
-        SimpleDateFormat("dd MMM, HH:mm", Locale("id", "ID")).format(Date(item.timestamp))
-    }
-
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column {
-                Text(
-                    text = item.note.ifBlank { item.categoryName },
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Text(
-                    text = "${item.accountName} • $dateStr",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray
-                )
-            }
-            Text(
-                text = "${if (isExpense) "-" else "+"}${formatter.format(item.amount)}",
-                style = MaterialTheme.typography.titleMedium,
-                color = if (isExpense) MaterialTheme.colorScheme.error else Color(0xFF2E7D32)
+        transactionToDelete?.let { item ->
+            DeleteTransactionDialog(
+                item = item,
+                onDismiss = { transactionToDelete = null },
+                onConfirm = { viewModel.deleteTransaction(item); transactionToDelete = null }
             )
         }
     }

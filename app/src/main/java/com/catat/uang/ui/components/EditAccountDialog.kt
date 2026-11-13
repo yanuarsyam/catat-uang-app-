@@ -10,27 +10,32 @@ import androidx.compose.ui.unit.dp
 import com.catat.uang.data.model.Account
 
 @Composable
-fun EditBalanceDialog(
+fun EditAccountDialog(
     account: Account,
     onDismiss: () -> Unit,
-    onSave: (newBalance: Long) -> Unit
+    onSave: (newName: String, newBalance: Long) -> Unit
 ) {
+    var nameText by remember { mutableStateOf(account.name) }
     var balanceText by remember { mutableStateOf(account.balance.toString()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Atur Saldo ${account.name}") },
+        title = { Text("Ubah Akun / Dompet") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Ketik nominal saldo saat ini untuk dompet ini:",
-                    style = MaterialTheme.typography.bodyMedium
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = nameText,
+                    onValueChange = { nameText = it },
+                    label = { Text("Nama Bank / E-Wallet") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = balanceText,
                     onValueChange = { if (it.all { c -> c.isDigit() }) balanceText = it },
-                    label = { Text("Nominal Saldo (Rp)") },
+                    label = { Text("Saldo Saat Ini (Rp)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -38,12 +43,14 @@ fun EditBalanceDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val newBal = balanceText.toLongOrNull() ?: 0L
-                    onSave(newBal)
-                    onDismiss()
+                    if (nameText.isNotBlank()) {
+                        val newBal = balanceText.toLongOrNull() ?: 0L
+                        onSave(nameText, newBal)
+                        onDismiss()
+                    }
                 }
             ) {
-                Text("Simpan Saldo")
+                Text("Simpan")
             }
         },
         dismissButton = {

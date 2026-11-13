@@ -29,13 +29,12 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
     init {
-        seedInitialCategoriesIfEmpty()
+        seedInitialDataIfEmpty()
     }
 
-    private fun seedInitialCategoriesIfEmpty() {
+    private fun seedInitialDataIfEmpty() {
         viewModelScope.launch {
             if (dao.getAccountCount() == 0) {
-                // Inisialisasi awal default jika kosong
                 dao.insertAccount(Account(name = "Dompet Tunai", balance = 0L, colorHex = "#2E7D32"))
                 dao.insertAccount(Account(name = "Rekening Bank", balance = 0L, colorHex = "#1565C0"))
                 dao.insertAccount(Account(name = "E-Wallet", balance = 0L, colorHex = "#6A1B9A"))
@@ -55,9 +54,9 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun updateAccountBalance(accountId: Long, newBalance: Long) {
+    fun updateAccountDetails(accountId: Long, newName: String, newBalance: Long) {
         viewModelScope.launch {
-            dao.setAccountBalanceDirectly(accountId, newBalance)
+            dao.updateAccountDetails(accountId, newName.trim(), newBalance)
         }
     }
 
@@ -75,6 +74,15 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             )
             val delta = if (type == "INCOME") amount else -amount
             dao.updateAccountBalance(accountId, delta)
+        }
+    }
+
+    fun deleteTransaction(item: TransactionItem) {
+        viewModelScope.launch {
+            dao.deleteTransactionById(item.id)
+            // Kembalikan saldo sesuai jenis transaksi
+            val refundDelta = if (item.type == "EXPENSE") item.amount else -item.amount
+            dao.updateAccountBalance(item.accountId, refundDelta)
         }
     }
 

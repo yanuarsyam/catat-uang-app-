@@ -24,13 +24,14 @@ data class TransactionEntity(
     val accountId: Long,
     val categoryId: Long,
     val amount: Long,
-    val type: String, // "EXPENSE" atau "INCOME"
+    val type: String,
     val timestamp: Long,
     val note: String
 )
 
 data class TransactionItem(
     val id: Long,
+    val accountId: Long,
     val amount: Long,
     val type: String,
     val timestamp: Long,
