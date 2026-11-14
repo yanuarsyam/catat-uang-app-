@@ -7,6 +7,9 @@ import com.catat.uang.data.local.AppDatabase
 import com.catat.uang.data.model.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.YearMonth
+import java.time.ZoneId
 
 class FinanceViewModel(application: Application) : AndroidViewModel(application) {
     private val dao = AppDatabase.getDatabase(application).financeDao()
@@ -14,18 +17,43 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     val accounts: StateFlow<List<Account>> = dao.getAllAccounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val transactions: StateFlow<List<TransactionItem>> = dao.getAllTransactions()
+    private val allTransactions: StateFlow<List<TransactionItem>> = dao.getAllTransactions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val expenseSummary: StateFlow<List<CategorySummary>> = dao.getExpenseSummaryByCategory()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _selectedMonth = MutableStateFlow<YearMonth?>(YearMonth.now())
+    val selectedMonth: StateFlow<YearMonth?> = _selectedMonth.asStateFlow()
+
+    val filteredTransactions: StateFlow<List<TransactionItem>> = combine(allTransactions, _selectedMonth) { list, ym ->
+        if (ym == null) list
+        else list.filter { item ->
+            val date = Instant.ofEpochMilli(item.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+            YearMonth.from(date) == ym
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val monthlyIncome: StateFlow<Long> = filteredTransactions.map { list ->
+        list.filter { it.type == "INCOME" }.sumOf { it.amount }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val monthlyExpense: StateFlow<Long> = filteredTransactions.map { list ->
+        list.filter { it.type == "EXPENSE" }.sumOf { it.amount }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val monthlyExpenseSummary: StateFlow<List<CategorySummary>> = filteredTransactions.map { list ->
+        list.filter { it.type == "EXPENSE" }
+            .groupBy { it.categoryName }
+            .map { (catName, items) ->
+                CategorySummary(
+                    categoryName = catName,
+                    colorHex = items.first().categoryColor,
+                    totalAmount = items.sumOf { it.amount }
+                )
+            }
+            .sortedByDescending { it.totalAmount }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val totalBalance: StateFlow<Long> = accounts.map { list ->
         list.sumOf { it.balance }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
-
-    val totalExpense: StateFlow<Long> = expenseSummary.map { list ->
-        list.sumOf { it.totalAmount }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
     init {
@@ -46,6 +74,20 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                 dao.insertCategory(Category(name = "Gaji / Pemasukan", colorHex = "#388E3C"))
             }
         }
+    }
+
+    fun previousMonth() {
+        val current = _selectedMonth.value ?: YearMonth.now()
+        _selectedMonth.value = current.minusMonths(1)
+    }
+
+    fun nextMonth() {
+        val current = _selectedMonth.value ?: YearMonth.now()
+        _selectedMonth.value = current.plusMonths(1)
+    }
+
+    fun toggleAllTime() {
+        _selectedMonth.value = if (_selectedMonth.value == null) YearMonth.now() else null
     }
 
     fun addAccount(name: String, initialBalance: Long, colorHex: String = "#1565C0") {
@@ -80,7 +122,6 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     fun deleteTransaction(item: TransactionItem) {
         viewModelScope.launch {
             dao.deleteTransactionById(item.id)
-            // Kembalikan saldo sesuai jenis transaksi
             val refundDelta = if (item.type == "EXPENSE") item.amount else -item.amount
             dao.updateAccountBalance(item.accountId, refundDelta)
         }

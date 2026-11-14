@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
+import com.catat.uang.BuildConfig
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
@@ -29,17 +30,25 @@ data class ParsedReceipt(
 object ReceiptScanner {
     private const val PREFS_NAME = "catat_uang_prefs"
     private const val KEY_GEMINI_API = "gemini_api_key"
+    private const val KEY_CUSTOM_SET = "gemini_custom_set"
 
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
     fun saveApiKey(context: Context, apiKey: String) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putString(KEY_GEMINI_API, apiKey.trim()).apply()
+            .edit()
+            .putString(KEY_GEMINI_API, apiKey.trim())
+            .putBoolean(KEY_CUSTOM_SET, true)
+            .apply()
     }
 
     fun getApiKey(context: Context): String {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getString(KEY_GEMINI_API, "") ?: ""
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return if (prefs.getBoolean(KEY_CUSTOM_SET, false)) {
+            prefs.getString(KEY_GEMINI_API, "") ?: ""
+        } else {
+            BuildConfig.GEMINI_API_KEY
+        }
     }
 
     suspend fun parseFromUri(context: Context, uri: Uri): ParsedReceipt {
@@ -150,7 +159,6 @@ object ReceiptScanner {
         val allLines = visionText.textBlocks.flatMap { it.lines }
         if (allLines.isEmpty()) return ParsedReceipt()
 
-        // Kelompokkan elemen teks berdasarkan koordinat vertikal (centerY) agar kolom kiri & kanan menyatu
         val sortedByY = allLines.sortedBy { it.boundingBox?.centerY() ?: 0 }
         val visualRows = mutableListOf<MutableList<Text.Line>>()
 
@@ -179,7 +187,6 @@ object ReceiptScanner {
         var detectedTotal = 0L
         val totalKeywords = listOf("grand total", "total :", "total:", "total ", "tunai", "debit", "bayar")
 
-        // Prioritas 1: Cari baris visual yang memuat kata kunci TOTAL (abaikan subtotal)
         for (row in rowStrings) {
             val lower = row.lowercase()
             if (lower.contains("subtotal") || lower.contains("sub total")) continue
@@ -192,7 +199,6 @@ object ReceiptScanner {
             }
         }
 
-        // Prioritas 2: Fallback angka nominal berformat ribuan (abaikan barcode 8+ digit tanpa pemisah)
         if (detectedTotal == 0L) {
             val candidates = rowStrings.flatMap { extractCurrencyNumbers(it) }
             detectedTotal = candidates.filter { it in 500..25_000_000 }.maxOrNull() ?: 0L
@@ -202,7 +208,6 @@ object ReceiptScanner {
     }
 
     private fun extractCurrencyNumbers(line: String): List<Long> {
-        // Cocokkan angka berformat ribuan (misal 313,430 atau 313.430) atau angka harga 3-7 digit di akhir baris
         val formattedRegex = Regex("""\b\d{1,3}(?:[.,]\d{3})+\b""")
         val formattedMatches = formattedRegex.findAll(line).mapNotNull {
             it.value.replace(".", "").replace(",", "").toLongOrNull()
@@ -210,7 +215,6 @@ object ReceiptScanner {
 
         if (formattedMatches.isNotEmpty()) return formattedMatches
 
-        // Jika tidak ada pemisah ribuan, hindari barcode 8+ digit di awal baris
         val plainRegex = Regex("""(?<!\d)\d{3,7}(?!\d)""")
         return plainRegex.findAll(line).mapNotNull { it.value.toLongOrNull() }.toList()
     }
