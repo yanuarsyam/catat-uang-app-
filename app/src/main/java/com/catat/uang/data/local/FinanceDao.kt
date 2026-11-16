@@ -26,7 +26,7 @@ interface FinanceDao {
 
     @Query("""
         SELECT 
-            t.id, t.accountId, t.amount, t.type, t.timestamp, t.note,
+            t.id, t.accountId, t.amount, t.type, t.timestamp, t.note, t.receiptPath,
             a.name AS accountName,
             c.name AS categoryName,
             c.colorHex AS categoryColor
@@ -45,16 +45,6 @@ interface FinanceDao {
 
     @Query("UPDATE accounts SET balance = balance + :delta WHERE id = :accountId")
     suspend fun updateAccountBalance(accountId: Long, delta: Long)
-
-    @Query("""
-        SELECT c.name AS categoryName, c.colorHex AS colorHex, COALESCE(SUM(t.amount), 0) AS totalAmount
-        FROM transactions t
-        INNER JOIN categories c ON t.categoryId = c.id
-        WHERE t.type = 'EXPENSE'
-        GROUP BY t.categoryId
-        ORDER BY totalAmount DESC
-    """)
-    fun getExpenseSummaryByCategory(): Flow<List<CategorySummary>>
 
     @Query("SELECT COUNT(*) FROM accounts")
     suspend fun getAccountCount(): Int

@@ -1,11 +1,13 @@
 package com.catat.uang.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -106,14 +108,21 @@ fun DeleteTransactionDialog(
 fun TransactionRow(
     item: TransactionItem,
     formatter: NumberFormat,
+    onViewReceiptClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
     val isExpense = item.type == "EXPENSE"
+    val hasReceipt = !item.receiptPath.isNullOrBlank()
     val dateStr = remember(item.timestamp) {
         SimpleDateFormat("dd MMM, HH:mm", Locale("id", "ID")).format(Date(item.timestamp))
     }
 
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (hasReceipt) Modifier.clickable { onViewReceiptClick() } else Modifier),
+        shape = RoundedCornerShape(10.dp)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -137,6 +146,16 @@ fun TransactionRow(
                 style = MaterialTheme.typography.titleMedium,
                 color = if (isExpense) MaterialTheme.colorScheme.error else Color(0xFF2E7D32)
             )
+            if (hasReceipt) {
+                IconButton(onClick = onViewReceiptClick) {
+                    Icon(
+                        Icons.Default.ReceiptLong,
+                        contentDescription = "Lihat Foto Struk",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
             IconButton(onClick = onDeleteClick) {
                 Icon(
                     Icons.Default.DeleteOutline,

@@ -36,8 +36,11 @@ import com.catat.uang.ui.FinanceViewModel
 import com.catat.uang.ui.components.*
 import com.catat.uang.util.CsvExporter
 import com.catat.uang.util.ReceiptScanner
+import com.catat.uang.util.ReceiptStorage
 import com.catat.uang.util.SecurityManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.NumberFormat
 import java.time.format.DateTimeFormatter
@@ -92,10 +95,12 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
     var showSecurityDialog by remember { mutableStateOf(false) }
     var accountToEdit by remember { mutableStateOf<Account?>(null) }
     var transactionToDelete by remember { mutableStateOf<TransactionItem?>(null) }
+    var transactionToPreview by remember { mutableStateOf<TransactionItem?>(null) }
 
     var isScanning by remember { mutableStateOf(false) }
     var prefillAmount by remember { mutableStateOf(0L) }
     var prefillNote by remember { mutableStateOf("") }
+    var prefillReceiptPath by remember { mutableStateOf<String?>(null) }
     var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
     val periodLabel = remember(selectedMonth) {
@@ -118,10 +123,14 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
     fun processImage(uri: Uri) {
         isScanning = true
         coroutineScope.launch {
+            val savedPath = withContext(Dispatchers.IO) {
+                ReceiptStorage.saveReceiptFromUri(context, uri)
+            }
             val parsed = ReceiptScanner.parseFromUri(context, uri)
             isScanning = false
             prefillAmount = parsed.totalAmount
             prefillNote = parsed.merchant
+            prefillReceiptPath = savedPath
             Toast.makeText(context, "Dipindai via ${parsed.sourceEngine}", Toast.LENGTH_SHORT).show()
             showAddDialog = true
         }
@@ -185,7 +194,12 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 )
                 FloatingActionButton(
-                    onClick = { prefillAmount = 0L; prefillNote = ""; showAddDialog = true },
+                    onClick = {
+                        prefillAmount = 0L
+                        prefillNote = ""
+                        prefillReceiptPath = null
+                        showAddDialog = true
+                    },
                     containerColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Tambah Catatan")
@@ -291,7 +305,12 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                     }
                 } else {
                     items(transactions) { item ->
-                        TransactionRow(item = item, formatter = formatter, onDeleteClick = { transactionToDelete = item })
+                        TransactionRow(
+                            item = item,
+                            formatter = formatter,
+                            onViewReceiptClick = { transactionToPreview = item },
+                            onDeleteClick = { transactionToDelete = item }
+                        )
                     }
                 }
 
@@ -340,8 +359,11 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 categories = categories,
                 initialAmount = prefillAmount,
                 initialNote = prefillNote,
+                initialReceiptPath = prefillReceiptPath,
                 onDismiss = { showAddDialog = false },
-                onSave = { accId, catId, amount, type, note -> viewModel.addTransaction(accId, catId, amount, type, note) }
+                onSave = { accId, catId, amount, type, note, path ->
+                    viewModel.addTransaction(accId, catId, amount, type, note, path)
+                }
             )
         }
         accountToEdit?.let { acc ->
@@ -364,6 +386,12 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 onConfirm = { viewModel.deleteTransaction(item); transactionToDelete = null }
             )
         }
+        transactionToPreview?.let { item ->
+            ReceiptPreviewDialog(
+                item = item,
+                formatter = formatter,
+                onDismiss = { transactionToPreview = null }
+            )
+        }
     }
 }
-

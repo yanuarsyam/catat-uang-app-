@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.catat.uang.data.local.AppDatabase
 import com.catat.uang.data.model.*
+import com.catat.uang.util.ReceiptStorage
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -102,7 +103,14 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun addTransaction(accountId: Long, categoryId: Long, amount: Long, type: String, note: String) {
+    fun addTransaction(
+        accountId: Long,
+        categoryId: Long,
+        amount: Long,
+        type: String,
+        note: String,
+        receiptPath: String? = null
+    ) {
         viewModelScope.launch {
             dao.insertTransaction(
                 TransactionEntity(
@@ -111,7 +119,8 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                     amount = amount,
                     type = type,
                     timestamp = System.currentTimeMillis(),
-                    note = note
+                    note = note,
+                    receiptPath = receiptPath
                 )
             )
             val delta = if (type == "INCOME") amount else -amount
@@ -124,6 +133,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             dao.deleteTransactionById(item.id)
             val refundDelta = if (item.type == "EXPENSE") item.amount else -item.amount
             dao.updateAccountBalance(item.accountId, refundDelta)
+            ReceiptStorage.deleteReceiptFile(item.receiptPath)
         }
     }
 

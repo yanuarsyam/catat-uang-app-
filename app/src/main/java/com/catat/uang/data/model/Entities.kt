@@ -26,7 +26,8 @@ data class TransactionEntity(
     val amount: Long,
     val type: String,
     val timestamp: Long,
-    val note: String
+    val note: String,
+    val receiptPath: String? = null
 )
 
 data class TransactionItem(
@@ -36,6 +37,7 @@ data class TransactionItem(
     val type: String,
     val timestamp: Long,
     val note: String,
+    val receiptPath: String?,
     val accountName: String,
     val categoryName: String,
     val categoryColor: String
