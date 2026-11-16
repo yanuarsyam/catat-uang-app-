@@ -35,6 +35,7 @@ data class TransactionItem(
     val id: Long,
     val accountId: Long,
     val targetAccountId: Long?,
+    val categoryId: Long,
     val amount: Long,
     val type: String,
     val timestamp: Long,

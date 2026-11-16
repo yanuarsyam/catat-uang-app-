@@ -1,13 +1,17 @@
 package com.catat.uang.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.catat.uang.data.local.AppDatabase
 import com.catat.uang.data.model.*
+import com.catat.uang.util.CsvImporter
 import com.catat.uang.util.ReceiptStorage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
@@ -24,7 +28,10 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     private val _selectedMonth = MutableStateFlow<YearMonth?>(YearMonth.now())
     val selectedMonth: StateFlow<YearMonth?> = _selectedMonth.asStateFlow()
 
-    val filteredTransactions: StateFlow<List<TransactionItem>> = combine(allTransactions, _selectedMonth) { list, ym ->
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val monthTransactions: StateFlow<List<TransactionItem>> = combine(allTransactions, _selectedMonth) { list, ym ->
         if (ym == null) list
         else list.filter { item ->
             val date = Instant.ofEpochMilli(item.timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
@@ -32,15 +39,27 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val monthlyIncome: StateFlow<Long> = filteredTransactions.map { list ->
+    val filteredTransactions: StateFlow<List<TransactionItem>> = combine(monthTransactions, _searchQuery) { list, query ->
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) list
+        else list.filter { item ->
+            item.note.lowercase().contains(q) ||
+                item.categoryName.lowercase().contains(q) ||
+                item.accountName.lowercase().contains(q) ||
+                (item.targetAccountName?.lowercase()?.contains(q) == true) ||
+                item.amount.toString().contains(q)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val monthlyIncome: StateFlow<Long> = monthTransactions.map { list ->
         list.filter { it.type == "INCOME" }.sumOf { it.amount }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
-    val monthlyExpense: StateFlow<Long> = filteredTransactions.map { list ->
+    val monthlyExpense: StateFlow<Long> = monthTransactions.map { list ->
         list.filter { it.type == "EXPENSE" }.sumOf { it.amount }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
-    val monthlyExpenseSummary: StateFlow<List<CategorySummary>> = filteredTransactions.map { list ->
+    val monthlyExpenseSummary: StateFlow<List<CategorySummary>> = monthTransactions.map { list ->
         list.filter { it.type == "EXPENSE" }
             .groupBy { it.categoryName }
             .map { (catName, items) ->
@@ -77,6 +96,10 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
     fun previousMonth() {
         val current = _selectedMonth.value ?: YearMonth.now()
         _selectedMonth.value = current.minusMonths(1)
@@ -93,7 +116,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
     fun addAccount(name: String, initialBalance: Long, colorHex: String = "#1565C0") {
         viewModelScope.launch {
-            dao.insertAccount(Account(name = name, balance = initialBalance, colorHex = colorHex))
+            dao.insertAccount(Account(name = name.trim(), balance = initialBalance, colorHex = colorHex))
         }
     }
 
@@ -103,12 +126,46 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun addCategory(name: String, colorHex: String) {
+        viewModelScope.launch {
+            if (name.isNotBlank()) {
+                dao.insertCategory(Category(name = name.trim(), colorHex = colorHex))
+            }
+        }
+    }
+
+    fun updateCategory(id: Long, name: String, colorHex: String) {
+        viewModelScope.launch {
+            if (name.isNotBlank()) {
+                dao.updateCategory(id, name.trim(), colorHex)
+            }
+        }
+    }
+
+    fun deleteCategory(categoryId: Long, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val allCats = dao.getAllCategoriesList()
+            if (allCats.size <= 1) {
+                onResult(false, "Minimal harus tersisa 1 kategori.")
+                return@launch
+            }
+            val usageCount = dao.countTransactionsByCategory(categoryId)
+            if (usageCount > 0) {
+                onResult(false, "Kategori ini dipakai oleh $usageCount transaksi.")
+                return@launch
+            }
+            dao.deleteCategoryById(categoryId)
+            onResult(true, "Kategori dihapus.")
+        }
+    }
+
     fun addTransaction(
         accountId: Long,
         categoryId: Long,
         amount: Long,
         type: String,
         note: String,
+        timestamp: Long = System.currentTimeMillis(),
         receiptPath: String? = null
     ) {
         viewModelScope.launch {
@@ -118,7 +175,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                     categoryId = categoryId,
                     amount = amount,
                     type = type,
-                    timestamp = System.currentTimeMillis(),
+                    timestamp = timestamp,
                     note = note,
                     receiptPath = receiptPath
                 )
@@ -128,7 +185,43 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun transferFunds(fromAccountId: Long, toAccountId: Long, amount: Long, note: String) {
+    fun updateTransaction(
+        oldItem: TransactionItem,
+        newAccountId: Long,
+        newCategoryId: Long,
+        newAmount: Long,
+        newType: String,
+        newTimestamp: Long,
+        newNote: String,
+        newReceiptPath: String?
+    ) {
+        viewModelScope.launch {
+            val revertDelta = if (oldItem.type == "EXPENSE") oldItem.amount else -oldItem.amount
+            dao.updateAccountBalance(oldItem.accountId, revertDelta)
+
+            val applyDelta = if (newType == "INCOME") newAmount else -newAmount
+            dao.updateAccountBalance(newAccountId, applyDelta)
+
+            dao.updateTransaction(
+                id = oldItem.id,
+                accountId = newAccountId,
+                categoryId = newCategoryId,
+                amount = newAmount,
+                type = newType,
+                timestamp = newTimestamp,
+                note = newNote,
+                receiptPath = newReceiptPath
+            )
+
+            if (oldItem.receiptPath != null && oldItem.receiptPath != newReceiptPath) {
+                if (dao.countTransactionsByReceiptPath(oldItem.receiptPath) == 0) {
+                    ReceiptStorage.deleteReceiptFile(oldItem.receiptPath)
+                }
+            }
+        }
+    }
+
+    fun transferFunds(fromAccountId: Long, toAccountId: Long, amount: Long, note: String, timestamp: Long = System.currentTimeMillis()) {
         if (fromAccountId == toAccountId || amount <= 0L) return
         viewModelScope.launch {
             val defaultCatId = dao.getFirstCategoryId() ?: 1L
@@ -137,7 +230,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                 toAccountId = toAccountId,
                 categoryId = defaultCatId,
                 amount = amount,
-                timestamp = System.currentTimeMillis(),
+                timestamp = timestamp,
                 note = note.trim()
             )
         }
@@ -155,7 +248,20 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                 val refundDelta = if (item.type == "EXPENSE") item.amount else -item.amount
                 dao.updateAccountBalance(item.accountId, refundDelta)
             }
-            ReceiptStorage.deleteReceiptFile(item.receiptPath)
+            item.receiptPath?.let { path ->
+                if (dao.countTransactionsByReceiptPath(path) == 0) {
+                    ReceiptStorage.deleteReceiptFile(path)
+                }
+            }
+        }
+    }
+
+    fun importFromCsv(uri: Uri, onComplete: (Int) -> Unit) {
+        viewModelScope.launch {
+            val count = withContext(Dispatchers.IO) {
+                CsvImporter.importCsvFromUri(getApplication(), uri, dao)
+            }
+            onComplete(count)
         }
     }
 

@@ -7,7 +7,6 @@ import android.net.Uri
 import android.util.Base64
 import com.catat.uang.BuildConfig
 import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
@@ -19,203 +18,175 @@ import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.coroutines.resume
-import kotlin.math.abs
+
+data class ParsedReceiptItem(
+    val name: String,
+    val amount: Long,
+    val suggestedCategory: String
+)
 
 data class ParsedReceipt(
-    val merchant: String = "",
-    val totalAmount: Long = 0L,
-    val sourceEngine: String = "Offline OCR"
+    val totalAmount: Long,
+    val merchant: String,
+    val sourceEngine: String,
+    val items: List<ParsedReceiptItem> = emptyList()
 )
 
 object ReceiptScanner {
-    private const val PREFS_NAME = "catat_uang_prefs"
-    private const val KEY_GEMINI_API = "gemini_api_key"
-    private const val KEY_CUSTOM_SET = "gemini_custom_set"
-
-    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-
-    fun saveApiKey(context: Context, apiKey: String) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_GEMINI_API, apiKey.trim())
-            .putBoolean(KEY_CUSTOM_SET, true)
-            .apply()
-    }
+    private const val PREF_NAME = "catat_uang_prefs"
+    private const val KEY_GEMINI = "gemini_api_key"
 
     fun getApiKey(context: Context): String {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return if (prefs.getBoolean(KEY_CUSTOM_SET, false)) {
-            prefs.getString(KEY_GEMINI_API, "") ?: ""
-        } else {
-            BuildConfig.GEMINI_API_KEY
-        }
+        val saved = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_GEMINI, "")?.trim().orEmpty()
+        return saved.ifEmpty { BuildConfig.GEMINI_API_KEY.trim() }
     }
 
-    suspend fun parseFromUri(context: Context, uri: Uri): ParsedReceipt {
+    fun saveApiKey(context: Context, key: String) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putString(KEY_GEMINI, key.trim()).apply()
+    }
+
+    suspend fun parseFromUri(
+        context: Context,
+        uri: Uri,
+        availableCategories: List<String> = emptyList()
+    ): ParsedReceipt = withContext(Dispatchers.IO) {
         val apiKey = getApiKey(context)
-        if (apiKey.isNotBlank()) {
-            val aiResult = parseWithGemini(context, uri, apiKey)
-            if (aiResult != null && aiResult.totalAmount > 0L) {
-                return aiResult
+        if (apiKey.isNotEmpty()) {
+            val geminiResult = parseWithGemini(context, uri, apiKey, availableCategories)
+            if (geminiResult != null && geminiResult.totalAmount > 0L) {
+                return@withContext geminiResult
             }
         }
-        return parseWithSpatialMlKit(context, uri)
+        parseWithMlKit(context, uri)
     }
 
-    private suspend fun parseWithGemini(context: Context, uri: Uri, apiKey: String): ParsedReceipt? =
-        withContext(Dispatchers.IO) {
-            try {
-                val base64Image = encodeImageToBase64(context, uri) ?: return@withContext null
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    setRequestProperty("Content-Type", "application/json")
-                    connectTimeout = 15000
-                    readTimeout = 20000
-                    doOutput = true
-                }
-
-                val prompt = """
-                    Analisis gambar struk belanja atau catatan tulisan tangan ini.
-                    Ekstrak nama toko/keterangan utama dan TOTAL akhir pembayaran bersih (abaikan nomor barcode/SKU/NPWP, perhitungkan diskon jika ada).
-                    Balas HANYA dengan format JSON valid tanpa markdown:
-                    {"merchant": "Nama Toko atau Ringkasan Catatan", "total": 313430}
-                """.trimIndent()
-
-                val payload = JSONObject().apply {
-                    put("contents", JSONArray().put(
-                        JSONObject().put("parts", JSONArray().apply {
-                            put(JSONObject().put("text", prompt))
-                            put(JSONObject().put("inline_data", JSONObject().apply {
-                                put("mime_type", "image/jpeg")
-                                put("data", base64Image)
-                            }))
-                        })
-                    ))
-                }
-
-                conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
-                if (conn.responseCode != 200) return@withContext null
-
-                val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
-                val root = JSONObject(responseStr)
-                val rawText = root.getJSONArray("candidates")
-                    .getJSONObject(0)
-                    .getJSONObject("content")
-                    .getJSONArray("parts")
-                    .getJSONObject(0)
-                    .getString("text")
-                    .replace("```json", "")
-                    .replace("```", "")
-                    .trim()
-
-                val parsedJson = JSONObject(rawText)
-                val merchant = parsedJson.optString("merchant", "Transaksi Struk")
-                val total = parsedJson.optLong("total", 0L)
-                ParsedReceipt(merchant = merchant, totalAmount = total, sourceEngine = "Gemini AI")
-            } catch (e: Exception) {
-                null
-            }
-        }
-
-    private fun encodeImageToBase64(context: Context, uri: Uri): String? {
+    private fun parseWithGemini(
+        context: Context,
+        uri: Uri,
+        apiKey: String,
+        availableCategories: List<String>
+    ): ParsedReceipt? {
         return try {
-            val input = context.contentResolver.openInputStream(uri) ?: return null
-            val original = BitmapFactory.decodeStream(input)
-            input.close()
-            if (original == null) return null
+            val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream)
+            } ?: return null
 
-            val maxDim = 1024
-            val scale = minOf(maxDim.toFloat() / original.width, maxDim.toFloat() / original.height, 1f)
-            val scaled = if (scale < 1f) {
-                Bitmap.createScaledBitmap(original, (original.width * scale).toInt(), (original.height * scale).toInt(), true)
-            } else original
+            val maxDim = 1280
+            val scale = minOf(maxDim.toFloat() / bitmap.width, maxDim.toFloat() / bitmap.height, 1f)
+            val resized = if (scale < 1f) {
+                Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+            } else bitmap
 
-            val out = ByteArrayOutputStream()
-            scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
-            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-        } catch (e: Exception) {
+            val baos = ByteArrayOutputStream()
+            resized.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+            val base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+
+            val catHint = if (availableCategories.isNotEmpty()) {
+                "Pilih 'category' paling cocok dari daftar ini: ${availableCategories.joinToString(", ")}."
+            } else {
+                "Isi 'category' dengan kategori pengeluaran umum bahasa Indonesia."
+            }
+
+            val promptText = """
+                Ekstrak data struk belanja atau catatan pengeluaran ini menjadi JSON murni tanpa markdown:
+                {
+                  "merchant": "Nama toko atau keterangan utama",
+                  "total": 0,
+                  "items": [
+                    {"name": "Nama barang/item", "amount": 0, "category": "Nama kategori"}
+                  ]
+                }
+                Aturan: 'total' dan 'amount' berupa angka integer Rupiah tanpa titik/koma. $catHint
+                Jika ada beberapa barang belanjaan, rinci ke dalam array 'items'.
+            """.trimIndent()
+
+            val payload = JSONObject().apply {
+                put("contents", JSONArray().put(JSONObject().apply {
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().put("text", promptText))
+                        put(JSONObject().put("inline_data", JSONObject().apply {
+                            put("mime_type", "image/jpeg")
+                            put("data", base64Image)
+                        }))
+                    })
+                }))
+            }
+
+            val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json")
+                connectTimeout = 20000
+                readTimeout = 25000
+                doOutput = true
+            }
+            conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+
+            if (conn.responseCode != 200) return null
+            val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
+            val textResp = JSONObject(responseStr)
+                .getJSONArray("candidates").getJSONObject(0)
+                .getJSONObject("content").getJSONArray("parts").getJSONObject(0)
+                .getString("text")
+
+            val cleanJson = textResp.replace("```json", "").replace("```", "").trim()
+            val obj = JSONObject(cleanJson)
+            val merchant = obj.optString("merchant", "Belanja Struk").trim()
+            var total = obj.optLong("total", 0L)
+
+            val parsedItems = mutableListOf<ParsedReceiptItem>()
+            val itemsArr = obj.optJSONArray("items")
+            if (itemsArr != null) {
+                for (i in 0 until itemsArr.length()) {
+                    val itemObj = itemsArr.optJSONObject(i) ?: continue
+                    val itemName = itemObj.optString("name", "").trim()
+                    val itemAmt = itemObj.optLong("amount", 0L)
+                    val itemCat = itemObj.optString("category", "").trim()
+                    if (itemName.isNotEmpty() && itemAmt > 0L) {
+                        parsedItems.add(ParsedReceiptItem(itemName, itemAmt, itemCat))
+                    }
+                }
+            }
+            if (total <= 0L && parsedItems.isNotEmpty()) {
+                total = parsedItems.sumOf { it.amount }
+            }
+
+            ParsedReceipt(
+                totalAmount = total,
+                merchant = merchant.ifEmpty { "Belanja Struk" },
+                sourceEngine = "Gemini AI",
+                items = parsedItems
+            )
+        } catch (_: Exception) {
             null
         }
     }
 
-    private suspend fun parseWithSpatialMlKit(context: Context, uri: Uri): ParsedReceipt =
-        suspendCancellableCoroutine { continuation ->
-            try {
-                val image = InputImage.fromFilePath(context, uri)
+    private suspend fun parseWithMlKit(context: Context, uri: Uri): ParsedReceipt {
+        return try {
+            val image = InputImage.fromFilePath(context, uri)
+            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            val rawText = suspendCancellableCoroutine { cont ->
                 recognizer.process(image)
-                    .addOnSuccessListener { visionText ->
-                        continuation.resume(extractSpatialData(visionText))
-                    }
-                    .addOnFailureListener {
-                        continuation.resume(ParsedReceipt())
-                    }
-            } catch (e: Exception) {
-                continuation.resume(ParsedReceipt())
+                    .addOnSuccessListener { cont.resume(it.text) }
+                    .addOnFailureListener { cont.resume("") }
             }
+            val lines = rawText.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val merchant = lines.firstOrNull { it.length > 2 && !it.all { c -> c.isDigit() } } ?: "Struk Offline"
+            val numbers = Regex("""\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{4,9}\b""")
+                .findAll(rawText)
+                .mapNotNull { it.value.replace(".", "").replace(",", "").toLongOrNull() }
+                .filter { it in 500L..500_000_000L }
+                .toList()
+            ParsedReceipt(
+                totalAmount = numbers.maxOrNull() ?: 0L,
+                merchant = merchant,
+                sourceEngine = "OCR Offline"
+            )
+        } catch (_: Exception) {
+            ParsedReceipt(0L, "Struk", "OCR Offline")
         }
-
-    private fun extractSpatialData(visionText: Text): ParsedReceipt {
-        val allLines = visionText.textBlocks.flatMap { it.lines }
-        if (allLines.isEmpty()) return ParsedReceipt()
-
-        val sortedByY = allLines.sortedBy { it.boundingBox?.centerY() ?: 0 }
-        val visualRows = mutableListOf<MutableList<Text.Line>>()
-
-        for (line in sortedByY) {
-            val box = line.boundingBox ?: continue
-            val matchingRow = visualRows.find { row ->
-                val refBox = row.first().boundingBox ?: return@find false
-                val tolerance = maxOf(refBox.height(), box.height()) * 0.65
-                abs(refBox.centerY() - box.centerY()) <= tolerance
-            }
-            if (matchingRow != null) {
-                matchingRow.add(line)
-            } else {
-                visualRows.add(mutableListOf(line))
-            }
-        }
-
-        val rowStrings = visualRows.map { row ->
-            row.sortedBy { it.boundingBox?.left ?: 0 }.joinToString(" ") { it.text.trim() }
-        }
-
-        val merchant = rowStrings.take(4).firstOrNull { line ->
-            line.length in 3..40 && line.count { it.isLetter() } > line.count { it.isDigit() }
-        } ?: rowStrings.first()
-
-        var detectedTotal = 0L
-        val totalKeywords = listOf("grand total", "total :", "total:", "total ", "tunai", "debit", "bayar")
-
-        for (row in rowStrings) {
-            val lower = row.lowercase()
-            if (lower.contains("subtotal") || lower.contains("sub total")) continue
-            if (totalKeywords.any { lower.contains(it) }) {
-                val amounts = extractCurrencyNumbers(row)
-                if (amounts.isNotEmpty()) {
-                    detectedTotal = amounts.last()
-                    break
-                }
-            }
-        }
-
-        if (detectedTotal == 0L) {
-            val candidates = rowStrings.flatMap { extractCurrencyNumbers(it) }
-            detectedTotal = candidates.filter { it in 500..25_000_000 }.maxOrNull() ?: 0L
-        }
-
-        return ParsedReceipt(merchant = merchant, totalAmount = detectedTotal, sourceEngine = "Offline OCR")
-    }
-
-    private fun extractCurrencyNumbers(line: String): List<Long> {
-        val formattedRegex = Regex("""\b\d{1,3}(?:[.,]\d{3})+\b""")
-        val formattedMatches = formattedRegex.findAll(line).mapNotNull {
-            it.value.replace(".", "").replace(",", "").toLongOrNull()
-        }.toList()
-
-        if (formattedMatches.isNotEmpty()) return formattedMatches
-
-        val plainRegex = Regex("""(?<!\d)\d{3,7}(?!\d)""")
-        return plainRegex.findAll(line).mapNotNull { it.value.toLongOrNull() }.toList()
     }
 }

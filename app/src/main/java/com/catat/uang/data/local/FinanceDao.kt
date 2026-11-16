@@ -13,6 +13,9 @@ interface FinanceDao {
     @Query("SELECT * FROM accounts ORDER BY id ASC")
     fun getAllAccounts(): Flow<List<Account>>
 
+    @Query("SELECT * FROM accounts ORDER BY id ASC")
+    suspend fun getAllAccountsList(): List<Account>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAccount(account: Account): Long
 
@@ -22,15 +25,30 @@ interface FinanceDao {
     @Query("SELECT * FROM categories ORDER BY name ASC")
     fun getAllCategories(): Flow<List<Category>>
 
+    @Query("SELECT * FROM categories ORDER BY name ASC")
+    suspend fun getAllCategoriesList(): List<Category>
+
     @Query("SELECT id FROM categories ORDER BY id ASC LIMIT 1")
     suspend fun getFirstCategoryId(): Long?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCategory(category: Category): Long
 
+    @Query("UPDATE categories SET name = :name, colorHex = :colorHex WHERE id = :id")
+    suspend fun updateCategory(id: Long, name: String, colorHex: String)
+
+    @Query("DELETE FROM categories WHERE id = :id")
+    suspend fun deleteCategoryById(id: Long)
+
+    @Query("SELECT COUNT(*) FROM transactions WHERE categoryId = :categoryId")
+    suspend fun countTransactionsByCategory(categoryId: Long): Int
+
+    @Query("SELECT COUNT(*) FROM transactions WHERE receiptPath = :path")
+    suspend fun countTransactionsByReceiptPath(path: String): Int
+
     @Query("""
         SELECT 
-            t.id, t.accountId, t.targetAccountId, t.amount, t.type, t.timestamp, t.note, t.receiptPath,
+            t.id, t.accountId, t.targetAccountId, t.categoryId, t.amount, t.type, t.timestamp, t.note, t.receiptPath,
             a.name AS accountName,
             a2.name AS targetAccountName,
             COALESCE(c.name, 'Transfer') AS categoryName,
@@ -45,6 +63,23 @@ interface FinanceDao {
 
     @Insert
     suspend fun insertTransaction(transaction: TransactionEntity): Long
+
+    @Query("""
+        UPDATE transactions 
+        SET accountId = :accountId, categoryId = :categoryId, amount = :amount, 
+            type = :type, timestamp = :timestamp, note = :note, receiptPath = :receiptPath 
+        WHERE id = :id
+    """)
+    suspend fun updateTransaction(
+        id: Long,
+        accountId: Long,
+        categoryId: Long,
+        amount: Long,
+        type: String,
+        timestamp: Long,
+        note: String,
+        receiptPath: String?
+    )
 
     @Query("DELETE FROM transactions WHERE id = :transactionId")
     suspend fun deleteTransactionById(transactionId: Long)

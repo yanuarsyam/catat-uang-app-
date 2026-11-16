@@ -59,7 +59,7 @@ fun ApiKeyDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Masukkan Gemini API Key untuk pembacaan struk & catatan tulisan tangan super akurat (kosongkan untuk mode offline):",
+                    text = "Masukkan Gemini API Key untuk pembacaan struk & catatan tulisan tangan super akurat (kosongkan untuk memakai kunci bawaan):",
                     style = MaterialTheme.typography.bodySmall
                 )
                 OutlinedTextField(
@@ -113,6 +113,7 @@ fun DeleteTransactionDialog(
 fun TransactionRow(
     item: TransactionItem,
     formatter: NumberFormat,
+    onEditClick: () -> Unit,
     onViewReceiptClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
@@ -120,7 +121,7 @@ fun TransactionRow(
     val isTransfer = item.type == "TRANSFER"
     val hasReceipt = !item.receiptPath.isNullOrBlank()
     val dateStr = remember(item.timestamp) {
-        SimpleDateFormat("dd MMM, HH:mm", Locale("id", "ID")).format(Date(item.timestamp))
+        SimpleDateFormat("dd MMM yyyy, HH:mm", Locale("id", "ID")).format(Date(item.timestamp))
     }
 
     val titleText = when {
@@ -130,7 +131,7 @@ fun TransactionRow(
 
     val subtitleText = when {
         isTransfer -> "${item.accountName} → ${item.targetAccountName ?: "Dompet Tujuan"} • $dateStr"
-        else -> "${item.accountName} • $dateStr"
+        else -> "${item.categoryName} • ${item.accountName} • $dateStr"
     }
 
     val amountPrefix = when {
@@ -148,7 +149,7 @@ fun TransactionRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (hasReceipt) Modifier.clickable { onViewReceiptClick() } else Modifier),
+            .then(if (!isTransfer) Modifier.clickable { onEditClick() } else Modifier),
         shape = RoundedCornerShape(10.dp)
     ) {
         Row(

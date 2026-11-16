@@ -5,9 +5,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,68 +29,86 @@ fun MonthlyRecapCard(
     onPrevMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onToggleAllTime: () -> Unit,
-    onExportCsvClick: () -> Unit
+    onExportCsvClick: () -> Unit,
+    onImportCsvClick: () -> Unit
 ) {
-    val label = if (selectedMonth == null) {
-        "Semua Waktu"
-    } else {
-        selectedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale("id", "ID")))
-            .replaceFirstChar { it.uppercase() }
+    val monthFormatter = remember {
+        DateTimeFormatter.ofPattern("MMMM yyyy", Locale("id", "ID"))
     }
-    val netFlow = monthlyIncome - monthlyExpense
+    val periodTitle = selectedMonth?.format(monthFormatter) ?: "Semua Waktu"
+    val netDiff = monthlyIncome - monthlyExpense
 
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onPrevMonth, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = onPrevMonth, enabled = selectedMonth != null) {
                         Icon(Icons.Default.ChevronLeft, contentDescription = "Bulan Sebelumnya")
                     }
                     Text(
-                        text = label,
+                        text = periodTitle,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 6.dp)
+                        fontWeight = FontWeight.Bold
                     )
-                    IconButton(onClick = onNextMonth, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = onNextMonth, enabled = selectedMonth != null) {
                         Icon(Icons.Default.ChevronRight, contentDescription = "Bulan Berikutnya")
                     }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     FilterChip(
                         selected = selectedMonth == null,
                         onClick = onToggleAllTime,
                         label = { Text("Semua", style = MaterialTheme.typography.labelSmall) }
                     )
-                    FilledTonalIconButton(onClick = onExportCsvClick, modifier = Modifier.size(34.dp)) {
-                        Icon(Icons.Default.FileDownload, contentDescription = "Ekspor CSV", modifier = Modifier.size(18.dp))
+                    IconButton(onClick = onImportCsvClick) {
+                        Icon(Icons.Default.UploadFile, contentDescription = "Impor / Restore CSV")
+                    }
+                    IconButton(onClick = onExportCsvClick) {
+                        Icon(Icons.Default.Download, contentDescription = "Ekspor CSV")
                     }
                 }
             }
 
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
                 Column {
                     Text("Pemasukan", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                    Text(formatter.format(monthlyIncome), style = MaterialTheme.typography.bodyMedium, color = Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = formatter.format(monthlyIncome),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2E7D32)
+                    )
                 }
-                Column {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Pengeluaran", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                    Text(formatter.format(monthlyExpense), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = formatter.format(monthlyExpense),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text("Selisih", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     Text(
-                        text = formatter.format(netFlow),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (netFlow >= 0) Color(0xFF1565C0) else MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.SemiBold
+                        text = formatter.format(netDiff),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (netDiff >= 0) Color(0xFF1565C0) else MaterialTheme.colorScheme.error
                     )
                 }
             }

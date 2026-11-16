@@ -35,6 +35,7 @@ import com.catat.uang.data.model.TransactionItem
 import com.catat.uang.ui.FinanceViewModel
 import com.catat.uang.ui.components.*
 import com.catat.uang.util.CsvExporter
+import com.catat.uang.util.ParsedReceipt
 import com.catat.uang.util.ReceiptScanner
 import com.catat.uang.util.ReceiptStorage
 import com.catat.uang.util.SecurityManager
@@ -82,6 +83,7 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
     val accounts by viewModel.accounts.collectAsState()
     val transactions by viewModel.filteredTransactions.collectAsState()
     val selectedMonth by viewModel.selectedMonth.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
     val monthlyIncome by viewModel.monthlyIncome.collectAsState()
     val monthlyExpense by viewModel.monthlyExpense.collectAsState()
     val expenseSummary by viewModel.monthlyExpenseSummary.collectAsState()
@@ -89,18 +91,22 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
     val categories by viewModel.getCategories().collectAsState(initial = emptyList())
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingTransaction by remember { mutableStateOf<TransactionItem?>(null) }
     var showAddAccountDialog by remember { mutableStateOf(false) }
     var showTransferDialog by remember { mutableStateOf(false) }
+    var showCategoryDialog by remember { mutableStateOf(false) }
     var showScanChoiceDialog by remember { mutableStateOf(false) }
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var showSecurityDialog by remember { mutableStateOf(false) }
     var accountToEdit by remember { mutableStateOf<Account?>(null) }
     var transactionToDelete by remember { mutableStateOf<TransactionItem?>(null) }
     var transactionToPreview by remember { mutableStateOf<TransactionItem?>(null) }
+    var pendingMultiScan by remember { mutableStateOf<ParsedReceipt?>(null) }
 
     var isScanning by remember { mutableStateOf(false) }
     var prefillAmount by remember { mutableStateOf(0L) }
     var prefillNote by remember { mutableStateOf("") }
+    var prefillCategoryName by remember { mutableStateOf<String?>(null) }
     var prefillReceiptPath by remember { mutableStateOf<String?>(null) }
     var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -121,19 +127,40 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
         }
     }
 
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.importFromCsv(uri) { count ->
+                Toast.makeText(
+                    context,
+                    if (count > 0) "Berhasil memulihkan $count transaksi dari CSV!" else "Tidak ada baris transaksi valid ditemukan",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
     fun processImage(uri: Uri) {
         isScanning = true
         coroutineScope.launch {
             val savedPath = withContext(Dispatchers.IO) {
                 ReceiptStorage.saveReceiptFromUri(context, uri)
             }
-            val parsed = ReceiptScanner.parseFromUri(context, uri)
+            val parsed = ReceiptScanner.parseFromUri(context, uri, categories.map { it.name })
             isScanning = false
             prefillAmount = parsed.totalAmount
             prefillNote = parsed.merchant
+            prefillCategoryName = parsed.items.firstOrNull()?.suggestedCategory
             prefillReceiptPath = savedPath
             Toast.makeText(context, "Dipindai via ${parsed.sourceEngine}", Toast.LENGTH_SHORT).show()
-            showAddDialog = true
+
+            if (parsed.items.size > 1) {
+                pendingMultiScan = parsed
+            } else {
+                editingTransaction = null
+                showAddDialog = true
+            }
         }
     }
 
@@ -177,6 +204,9 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
             TopAppBar(
                 title = { Text("Catatan Keuangan", style = MaterialTheme.typography.titleLarge) },
                 actions = {
+                    IconButton(onClick = { showCategoryDialog = true }) {
+                        Icon(Icons.Default.Category, contentDescription = "Kelola Kategori")
+                    }
                     IconButton(onClick = { showSecurityDialog = true }) {
                         Icon(Icons.Default.Lock, contentDescription = "Pengaman PIN & Biometrik")
                     }
@@ -196,8 +226,10 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 )
                 FloatingActionButton(
                     onClick = {
+                        editingTransaction = null
                         prefillAmount = 0L
                         prefillNote = ""
+                        prefillCategoryName = null
                         prefillReceiptPath = null
                         showAddDialog = true
                     },
@@ -278,7 +310,8 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                         onPrevMonth = { viewModel.previousMonth() },
                         onNextMonth = { viewModel.nextMonth() },
                         onToggleAllTime = { viewModel.toggleAllTime() },
-                        onExportCsvClick = { exportLauncher.launch("Catatan_Keuangan_$periodLabel.csv") }
+                        onExportCsvClick = { exportLauncher.launch("Catatan_Keuangan_$periodLabel.csv") },
+                        onImportCsvClick = { importLauncher.launch(arrayOf("text/*", "application/csv", "application/vnd.ms-excel")) }
                     )
                 }
 
@@ -291,21 +324,48 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text(text = "Analisis Pengeluaran", style = MaterialTheme.typography.titleMedium)
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = "Analisis Pengeluaran", style = MaterialTheme.typography.titleMedium)
+                                TextButton(onClick = { showCategoryDialog = true }) {
+                                    Text("Kategori")
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
                             DonutChart(summaryList = expenseSummary, totalExpense = monthlyExpense)
                         }
                     }
                 }
 
                 item {
-                    Text(text = "Riwayat Transaksi (${transactions.size})", style = MaterialTheme.typography.titleMedium)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(text = "Riwayat Transaksi (${transactions.size})", style = MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { viewModel.setSearchQuery(it) },
+                            placeholder = { Text("Cari toko, kategori, dompet, atau nominal...") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Hapus Pencarian")
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
 
                 if (transactions.isEmpty()) {
                     item {
                         Text(
-                            text = "Tidak ada transaksi pada periode ini.",
+                            text = if (searchQuery.isNotBlank()) "Tidak ada transaksi yang cocok dengan '$searchQuery'." else "Tidak ada transaksi pada periode ini.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray,
                             modifier = Modifier.padding(vertical = 12.dp)
@@ -316,6 +376,10 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                         TransactionRow(
                             item = item,
                             formatter = formatter,
+                            onEditClick = {
+                                editingTransaction = item
+                                showAddDialog = true
+                            },
                             onViewReceiptClick = { transactionToPreview = item },
                             onDeleteClick = { transactionToDelete = item }
                         )
@@ -361,6 +425,15 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
         if (showSecurityDialog) {
             SecuritySettingsDialog(onDismiss = { showSecurityDialog = false })
         }
+        if (showCategoryDialog) {
+            CategoryManagerDialog(
+                categories = categories,
+                onDismiss = { showCategoryDialog = false },
+                onAddCategory = { name, hex -> viewModel.addCategory(name, hex) },
+                onUpdateCategory = { id, name, hex -> viewModel.updateCategory(id, name, hex) },
+                onDeleteCategory = { id, cb -> viewModel.deleteCategory(id, cb) }
+            )
+        }
         if (showTransferDialog) {
             TransferDialog(
                 accounts = accounts,
@@ -372,16 +445,54 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                 }
             )
         }
+        pendingMultiScan?.let { parsed ->
+            MultiItemScanDialog(
+                parsedReceipt = parsed,
+                accounts = accounts,
+                categories = categories,
+                formatter = formatter,
+                onDismiss = {
+                    ReceiptStorage.deleteReceiptFile(prefillReceiptPath)
+                    pendingMultiScan = null
+                },
+                onSaveSingleTotal = {
+                    pendingMultiScan = null
+                    editingTransaction = null
+                    showAddDialog = true
+                },
+                onSaveSplitItems = { accId, chosenItems ->
+                    val now = System.currentTimeMillis()
+                    chosenItems.forEach { (item, catId) ->
+                        val itemNote = "${parsed.merchant}: ${item.name}"
+                        viewModel.addTransaction(accId, catId, item.amount, "EXPENSE", itemNote, now, prefillReceiptPath)
+                    }
+                    Toast.makeText(context, "${chosenItems.size} item struk berhasil disimpan!", Toast.LENGTH_SHORT).show()
+                    pendingMultiScan = null
+                }
+            )
+        }
         if (showAddDialog) {
             AddTransactionDialog(
                 accounts = accounts,
                 categories = categories,
+                editingItem = editingTransaction,
                 initialAmount = prefillAmount,
                 initialNote = prefillNote,
+                initialCategoryName = prefillCategoryName,
                 initialReceiptPath = prefillReceiptPath,
-                onDismiss = { showAddDialog = false },
-                onSave = { accId, catId, amount, type, note, path ->
-                    viewModel.addTransaction(accId, catId, amount, type, note, path)
+                onDismiss = {
+                    showAddDialog = false
+                    editingTransaction = null
+                },
+                onSave = { accId, catId, amount, type, note, ts, path ->
+                    val targetEdit = editingTransaction
+                    if (targetEdit != null) {
+                        viewModel.updateTransaction(targetEdit, accId, catId, amount, type, ts, note, path)
+                        Toast.makeText(context, "Transaksi diperbarui", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.addTransaction(accId, catId, amount, type, note, ts, path)
+                    }
+                    editingTransaction = null
                 }
             )
         }
