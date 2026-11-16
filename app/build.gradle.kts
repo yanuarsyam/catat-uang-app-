@@ -13,11 +13,31 @@ android {
         applicationId = "com.catat.uang"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
 
         val geminiApiKey = System.getenv("GEMINI_API_KEY") ?: ""
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+    }
+
+    signingConfigs {
+        create("persistent") {
+            val ksFile = file("catatuang.keystore")
+            if (ksFile.exists()) {
+                storeFile = ksFile
+                storePassword = "catatuang123"
+                keyAlias = "catatuang"
+                keyPassword = "catatuang123"
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            if (file("catatuang.keystore").exists()) {
+                signingConfig = signingConfigs.getByName("persistent")
+            }
+        }
     }
 
     buildFeatures {
