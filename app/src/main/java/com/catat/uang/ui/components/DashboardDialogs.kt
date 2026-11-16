@@ -86,12 +86,17 @@ fun DeleteTransactionDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
+    val isTransfer = item.type == "TRANSFER"
+    val message = if (isTransfer) {
+        "Riwayat transfer ini akan dihapus dan saldo ${item.accountName} serta ${item.targetAccountName ?: "dompet tujuan"} akan dikembalikan ke posisi sebelumnya."
+    } else {
+        "Catatan '${item.note.ifBlank { item.categoryName }}' akan dihapus dan saldo ${item.accountName} otomatis disesuaikan."
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Hapus Transaksi?") },
-        text = {
-            Text("Catatan '${item.note.ifBlank { item.categoryName }}' akan dihapus dan saldo ${item.accountName} otomatis disesuaikan.")
-        },
+        title = { Text(if (isTransfer) "Hapus Riwayat Transfer?" else "Hapus Transaksi?") },
+        text = { Text(message) },
         confirmButton = {
             Button(
                 onClick = onConfirm,
@@ -112,9 +117,32 @@ fun TransactionRow(
     onDeleteClick: () -> Unit
 ) {
     val isExpense = item.type == "EXPENSE"
+    val isTransfer = item.type == "TRANSFER"
     val hasReceipt = !item.receiptPath.isNullOrBlank()
     val dateStr = remember(item.timestamp) {
         SimpleDateFormat("dd MMM, HH:mm", Locale("id", "ID")).format(Date(item.timestamp))
+    }
+
+    val titleText = when {
+        isTransfer -> item.note.ifBlank { "Transfer Antar Dompet" }
+        else -> item.note.ifBlank { item.categoryName }
+    }
+
+    val subtitleText = when {
+        isTransfer -> "${item.accountName} → ${item.targetAccountName ?: "Dompet Tujuan"} • $dateStr"
+        else -> "${item.accountName} • $dateStr"
+    }
+
+    val amountPrefix = when {
+        isTransfer -> "⇄ "
+        isExpense -> "-"
+        else -> "+"
+    }
+
+    val amountColor = when {
+        isTransfer -> Color(0xFF1565C0)
+        isExpense -> MaterialTheme.colorScheme.error
+        else -> Color(0xFF2E7D32)
     }
 
     Card(
@@ -132,19 +160,19 @@ fun TransactionRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = item.note.ifBlank { item.categoryName },
+                    text = titleText,
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Text(
-                    text = "${item.accountName} • $dateStr",
+                    text = subtitleText,
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray
                 )
             }
             Text(
-                text = "${if (isExpense) "-" else "+"}${formatter.format(item.amount)}",
+                text = "$amountPrefix${formatter.format(item.amount)}",
                 style = MaterialTheme.typography.titleMedium,
-                color = if (isExpense) MaterialTheme.colorScheme.error else Color(0xFF2E7D32)
+                color = amountColor
             )
             if (hasReceipt) {
                 IconButton(onClick = onViewReceiptClick) {

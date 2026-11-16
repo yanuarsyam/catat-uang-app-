@@ -22,6 +22,7 @@ data class Category(
 data class TransactionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val accountId: Long,
+    val targetAccountId: Long? = null,
     val categoryId: Long,
     val amount: Long,
     val type: String,
@@ -33,12 +34,14 @@ data class TransactionEntity(
 data class TransactionItem(
     val id: Long,
     val accountId: Long,
+    val targetAccountId: Long?,
     val amount: Long,
     val type: String,
     val timestamp: Long,
     val note: String,
     val receiptPath: String?,
     val accountName: String,
+    val targetAccountName: String?,
     val categoryName: String,
     val categoryColor: String
 )

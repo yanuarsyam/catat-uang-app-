@@ -90,6 +90,7 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showAddAccountDialog by remember { mutableStateOf(false) }
+    var showTransferDialog by remember { mutableStateOf(false) }
     var showScanChoiceDialog by remember { mutableStateOf(false) }
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var showSecurityDialog by remember { mutableStateOf(false) }
@@ -232,10 +233,17 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(text = "Dompet & Rekening", style = MaterialTheme.typography.titleMedium)
-                        TextButton(onClick = { showAddAccountDialog = true }) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Tambah")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { showTransferDialog = true }) {
+                                Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Transfer")
+                            }
+                            TextButton(onClick = { showAddAccountDialog = true }) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Tambah")
+                            }
                         }
                     }
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -352,6 +360,17 @@ fun DashboardScreen(viewModel: FinanceViewModel) {
         }
         if (showSecurityDialog) {
             SecuritySettingsDialog(onDismiss = { showSecurityDialog = false })
+        }
+        if (showTransferDialog) {
+            TransferDialog(
+                accounts = accounts,
+                formatter = formatter,
+                onDismiss = { showTransferDialog = false },
+                onTransfer = { fromId, toId, amount, note ->
+                    viewModel.transferFunds(fromId, toId, amount, note)
+                    Toast.makeText(context, "Transfer saldo berhasil dicatat!", Toast.LENGTH_SHORT).show()
+                }
+            )
         }
         if (showAddDialog) {
             AddTransactionDialog(

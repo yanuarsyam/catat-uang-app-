@@ -128,11 +128,33 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun transferFunds(fromAccountId: Long, toAccountId: Long, amount: Long, note: String) {
+        if (fromAccountId == toAccountId || amount <= 0L) return
+        viewModelScope.launch {
+            val defaultCatId = dao.getFirstCategoryId() ?: 1L
+            dao.executeTransfer(
+                fromAccountId = fromAccountId,
+                toAccountId = toAccountId,
+                categoryId = defaultCatId,
+                amount = amount,
+                timestamp = System.currentTimeMillis(),
+                note = note.trim()
+            )
+        }
+    }
+
     fun deleteTransaction(item: TransactionItem) {
         viewModelScope.launch {
             dao.deleteTransactionById(item.id)
-            val refundDelta = if (item.type == "EXPENSE") item.amount else -item.amount
-            dao.updateAccountBalance(item.accountId, refundDelta)
+            if (item.type == "TRANSFER") {
+                dao.updateAccountBalance(item.accountId, item.amount)
+                item.targetAccountId?.let { targetId ->
+                    dao.updateAccountBalance(targetId, -item.amount)
+                }
+            } else {
+                val refundDelta = if (item.type == "EXPENSE") item.amount else -item.amount
+                dao.updateAccountBalance(item.accountId, refundDelta)
+            }
             ReceiptStorage.deleteReceiptFile(item.receiptPath)
         }
     }
